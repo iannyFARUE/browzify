@@ -47,3 +47,52 @@ const TOOL_DEFINITIONS: Record<
     }),
   },
 };
+
+/**
+ * Single-turn executor with mocked tools.
+ * Uses predefined tool definitions - tools never execute, only selection is tested.
+ */
+export async function singleTurnWithMocks(
+  data: EvalData,
+): Promise<SingleTurnResult> {
+  const messages = buildMessages(data);
+
+  // Build mocked tools from definitions
+  const tools: ToolSet = {};
+  for (const toolName of data.tools) {
+    const def = TOOL_DEFINITIONS[toolName];
+    if (def) {
+      tools[toolName] = tool({
+        description: def.description,
+        inputSchema: def.parameters,
+      });
+    }
+  }
+
+  const result = await generateText({
+    model: openai(data.config?.model ?? "gpt-4o-mini"),
+    messages,
+    tools,
+    stopWhen: stepCountIs(1),
+    temperature: data.config?.temperature ?? undefined,
+  });
+
+  // Extract tool calls from the result
+  const toolCalls = (result.toolCalls ?? []).map((tc) => ({
+    toolName: tc.toolName,
+    args: "args" in tc ? tc.args : {},
+  }));
+
+  const toolNames = toolCalls.map((tc) => tc.toolName);
+
+  return {
+    toolCalls,
+    toolNames,
+    selectedAny: toolNames.length > 0,
+  };
+}
+
+/**
+ * Multi-turn executor with mocked tools.
+ * Runs a complete agent loop with tools returning fixed values.
+ */

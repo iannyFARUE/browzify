@@ -1,13 +1,13 @@
 import "dotenv/config"
 import {openai} from "@ai-sdk/openai"
-import { SYSTEM_PROMPT } from "./system/prompt";
-import type { AgentCallbacks, ToolCallInfo } from "../types";
+import { SYSTEM_PROMPT } from "./system/prompt.ts";
+import type { AgentCallbacks, ToolCallInfo } from "../types.ts";
 import { getTracer, Laminar } from "@lmnr-ai/lmnr";
 import { streamText, type ModelMessage } from "ai";
 import { filterCompatibleMessages } from "./system/filterMessages.ts";
 import { anthropic } from "@ai-sdk/anthropic";
-import { tools } from "./tools";
-import { executeTool } from "./executeTools";
+import { tools } from "./tools/index.ts";
+import { executeTool } from "./executeTools.ts";
 
 const MODEL_NAME = "gpt-5-mini"
 

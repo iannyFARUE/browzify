@@ -1,11 +1,10 @@
 import "dotenv/config"
-import { generateText, type ModelMessage } from "ai";
 import {openai} from "@ai-sdk/openai"
 import { SYSTEM_PROMPT } from "./system/prompt";
-import type { AgentCallbacks } from "../types";
+import type { AgentCallbacks, ToolCallInfo } from "../types";
 import { getTracer, Laminar } from "@lmnr-ai/lmnr";
-
-
+import { streamText, type ModelMessage } from "ai";
+import { filterCompatibleMessages } from "./system/filterMessages.ts";
 import { anthropic } from "@ai-sdk/anthropic";
 import { tools } from "./tools";
 import { executeTool } from "./executeTools";
@@ -22,26 +21,103 @@ export const runAgent = async (
     callbacks: AgentCallbacks
 ): Promise<any> => {
 
-    const {text, toolCalls} = await generateText({
-        model: openai(MODEL_NAME),
-        prompt: userMessage,
-        system: SYSTEM_PROMPT,
-        tools,
-        experimental_telemetry: {
-          isEnabled:true,
-          tracer: getTracer()  
-        }
+// Filter and check if we need to compact the conversation history before starting
+  const workingHistory = filterCompatibleMessages(conversationHistory);
+
+  const messages: ModelMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...workingHistory,
+    { role: "user", content: userMessage },
+  ];
+
+  let fullResponse = "";
+
+  while (true) {
+    const result = streamText({
+      model: openai(MODEL_NAME),
+      messages,
+      tools,
+      experimental_telemetry: {
+        isEnabled: true,
+        tracer: getTracer(),
+      },
     });
 
-    // console.log(text, toolCalls);
+    const toolCalls: ToolCallInfo[] = [];
+    let currentText = "";
+    let streamError: Error | null = null;
 
-    // toolCalls.forEach(async (tc) => {
-    //     console.log(await executeTool(tc.toolName, tc.input))
-    // })
+    try {
+      for await (const chunk of result.fullStream) {
+        if (chunk.type === "text-delta") {
+          currentText += chunk.text;
+          callbacks.onToken(chunk.text);
+        }
 
-    await Laminar.flush();
-    console.log("done")
+        if (chunk.type === "tool-call") {
+          const input = "input" in chunk ? chunk.input : {};
+          toolCalls.push({
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolName,
+            args: input as Record<string, unknown>,
+          });
+          callbacks.onToolCallStart(chunk.toolName, input);
+        }
+      }
+    } catch (error) {
+      streamError = error as Error;
+      // If we have some text, continue processing
+      // Otherwise, rethrow if it's not a "no output" error
+      if (
+        !currentText &&
+        !streamError.message.includes("No output generated")
+      ) {
+        throw streamError;
+      }
+    }
+
+    fullResponse += currentText;
+
+    // If stream errored with "no output" and we have no text, try to recover
+    if (streamError && !currentText) {
+      // Add a fallback response
+      fullResponse =
+        "I apologize, but I wasn't able to generate a response. Could you please try rephrasing your message?";
+      callbacks.onToken(fullResponse);
+      break;
+    }
+
+    const finishReason = await result.finishReason;
+
+    if (finishReason !== "tool-calls" || toolCalls.length === 0) {
+      const responseMessages = await result.response;
+      messages.push(...responseMessages.messages);
+
+      break;
+    }
+
+    const responseMessages = await result.response;
+    messages.push(...responseMessages.messages);
+
+    for (const tc of toolCalls) {
+      const result = await executeTool(tc.toolName, tc.args);
+      callbacks.onToolCallEnd(tc.toolName, result);
+
+      messages.push({
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            output: { type: "text", value: result },
+          },
+        ],
+      });
+    }
+  }
+
+  callbacks.onComplete(fullResponse);
+
+  return messages;
 }
-
-
-runAgent('what is the current time now ?',[],)

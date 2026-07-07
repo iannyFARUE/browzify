@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, type ModelMessage, type ToolSet } from "ai";
+import { generateText, stepCountIs, tool, type ToolSet } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import type {
@@ -7,7 +7,7 @@ import type {
   MultiTurnEvalData,
   MultiTurnResult,
 } from "./types.ts";
-
+import { buildMessages } from "./utils.ts";
 
 const TOOL_DEFINITIONS: Record<
   string,

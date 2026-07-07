@@ -1,7 +1,7 @@
 [
   {
     "data": {
-      "prompt": "Read the contents of package.json",
+      "prompt": "Read the contents of package.json file in this project",
       "tools": ["readFile", "writeFile", "listFiles", "deleteFile"]
     },
     "target": {

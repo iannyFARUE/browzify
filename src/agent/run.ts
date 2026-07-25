@@ -141,8 +141,14 @@ export const runAgent = async (
     const responseMessages = await result.response;
     messages.push(...responseMessages.messages);
     reportTokenUsage();
-
+    let rejected = false;
     for (const tc of toolCalls) {
+      const approved = await callbacks.onToolApproval(tc.toolName, tc.args);
+
+      if(!approved) {
+        rejected = true;
+        break;
+      }
       const result = await executeTool(tc.toolName, tc.args);
       callbacks.onToolCallEnd(tc.toolName, result);
 
@@ -158,6 +164,10 @@ export const runAgent = async (
         ],
       });
       reportTokenUsage();
+    }
+
+    if(rejected){
+      break;
     }
   }
 
